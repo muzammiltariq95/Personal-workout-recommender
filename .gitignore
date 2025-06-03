@@ -1,0 +1,15 @@
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Environment or system files (optional)
+.env
+.DS_Store
+*.log
+
+# Streamlit cache (optional)
+.streamlit/
