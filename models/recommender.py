@@ -1,18 +1,22 @@
 import pandas as pd
 
-def recommend_workouts(df, workout_type=None, level=None, bodypart=None, equipment=None, n=5):
-    filtered = df.copy()
+def recommend_workouts(
+    df,
+    type_filter=None,
+    body_part_filter=None,
+    equipment_filter=None,
+    level_filter=None,
+    n=5
+    ):
+    filtered_df = df.copy()
 
-    if workout_type:
-        filtered = filtered[filtered['Type'].str.lower() == workout_type.lower()]
-    if level:
-        filtered = filtered[filtered['Level'].str.lower() == level.lower()]
-    if bodypart:
-        filtered = filtered[filtered['BodyPart'].str.lower() == bodypart.lower()]
-    if equipment:
-        filtered = filtered[filtered['Equipment'].fillna('unknown').str.lower().str.contains(equipment.lower())]
+    if type_filter:
+        filtered_df = filtered_df[filtered_df["Type"] == type_filter]
+    if body_part_filter:
+        filtered_df = filtered_df[filtered_df["BodyPart"] == body_part_filter]
+    if equipment_filter:
+        filtered_df = filtered_df[filtered_df["Equipment"] == equipment_filter]
+    if level_filter:
+        filtered_df = filtered_df[filtered_df["Level"] == level_filter]
 
-    if filtered.empty:
-        return df.sample(n)
-
-    return filtered.sample(n)
+    return filtered_df.sample(n=min(n, len(filtered_df)))
