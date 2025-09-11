@@ -5,34 +5,34 @@ import sys
 import os
 
 # ----------------------
-# 📁 Import Local Module
+# Import Local Module
 # ----------------------
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models.recommender import recommend_workouts
 
 # ----------------------
-# 🔐 Load API Key
+# Load API Key
 # ----------------------
 YOUTUBE_API_KEY = st.secrets["api"]["youtube_key"]
 
 # ----------------------
-# 📊 Load Data
+# Load Data
 # ----------------------
 df = pd.read_csv('data/cleaned_gym_exercise_data.csv')
 
 # ----------------------
-# 💪 App Header
+# App Header
 # ----------------------
 st.set_page_config(page_title="Workout Recommender", layout="centered")
 st.title("Personal Workout Recommender")
 st.markdown("""
-Welcome to your AI-powered workout buddy!  
-Just tell us your fitness level, available equipment, and target body area — and we’ll recommend workouts tailored to you.
----
+Welcome to your AI-powered workout guide. 
+            Looking for a good workout to do today? I've got you covered! 
+            Just give me the details below and I'll have it ready
 """)
 
 # ----------------------
-# 🎛️ User Inputs
+# User Inputs
 # ----------------------
 col1, col2 = st.columns(2)
 with col1:
@@ -45,7 +45,7 @@ with col2:
 num_recommendations = st.slider("Number of Recommendations", 1, 10, 5)
 
 # ----------------------
-# 🔍 YouTube API Helper
+# YouTube API Helper
 # ----------------------
 def fetch_youtube_video(query, max_results=1):
     url = "https://www.googleapis.com/youtube/v3/search"
@@ -67,13 +67,13 @@ def fetch_youtube_video(query, max_results=1):
     return videos
 
 # ----------------------
-# 🧠 Logic to Convert 'Any' to None
+# Logic to Convert 'Any' to None
 # ----------------------
 def none_if_any(value):
     return None if value == "Any" else value
 
 # ----------------------
-# 🚀 Recommender Button
+# Recommender Button
 # ----------------------
 if st.button("Get My Workout Plan"):
     results = recommend_workouts(
