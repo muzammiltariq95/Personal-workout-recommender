@@ -19,3 +19,7 @@ This is an AI-powered workout recommendation app built using **Python**, **Panda
 - Pandas
 - Streamlit
 - YouTube Data API
+
+
+<img width="990" height="744" alt="Screenshot 2025-10-12 154208" src="https://github.com/user-attachments/assets/c26b2506-5ff7-489e-b473-2f99a1559522" />
+<img width="1100" height="852" alt="Screenshot 2025-10-12 154238" src="https://github.com/user-attachments/assets/5a5504ec-b890-4de5-b228-946c804db38a" />
