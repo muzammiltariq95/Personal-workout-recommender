@@ -3,28 +3,29 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-import requests
 import streamlit as st
 
 # ----------------------
 # Page Config (must be the first Streamlit command)
 # ----------------------
-st.set_page_config(page_title="Workout Recommender", layout="centered")
+st.set_page_config(page_title="Workout Recommender", page_icon="💪", layout="centered")
 
 # ----------------------
-# Import Local Module
+# Import Local Modules
 # ----------------------
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
+from app.youtube import YouTubeError, fetch_youtube_video, youtube_search_url  # noqa: E402
 from models.recommender import filter_mask, recommend_workouts  # noqa: E402
 
 DATA_PATH = ROOT_DIR / "data" / "cleaned_gym_exercise_data.csv"
-YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
-VIDEO_CACHE_TTL = 60 * 60 * 24 * 7  # one week; each search costs 100 quota units
+DISPLAY_COLUMNS = ["Title", "Type", "Level", "BodyPart", "Equipment"]
+LEVEL_COLORS = {"Beginner": "green", "Intermediate": "orange", "Expert": "red"}
+CARD_STATE_PREFIXES = ("done_", "video_")
 
 
 # ----------------------
-# Load API Key
+# Load API Key and Data
 # ----------------------
 def get_youtube_api_key():
     """Return the YouTube API key, or None if it isn't configured."""
@@ -34,31 +35,16 @@ def get_youtube_api_key():
         return os.environ.get("YOUTUBE_API_KEY")
 
 
-YOUTUBE_API_KEY = get_youtube_api_key()
-
-
-# ----------------------
-# Load Data
-# ----------------------
 @st.cache_data
 def load_data(path):
     return pd.read_csv(path)
 
 
+YOUTUBE_API_KEY = get_youtube_api_key()
 df = load_data(DATA_PATH)
 
 # ----------------------
-# App Header
-# ----------------------
-st.title("Personal Workout Recommender")
-st.markdown("""
-Welcome to your AI-powered workout guide.
-Looking for a good workout to do today? I've got you covered!
-Just give me the details below and I'll have it ready.
-""")
-
-# ----------------------
-# User Inputs
+# Filters
 # ----------------------
 # Each filter: session_state key -> (DataFrame column, recommender keyword argument)
 FILTERS = {
@@ -87,6 +73,15 @@ def selected_filters(exclude=None):
     }
 
 
+def describe_filters(filters):
+    parts = [
+        ", ".join(value) if isinstance(value, list) else value
+        for value in filters.values()
+        if value
+    ]
+    return " · ".join(parts) if parts else "No filters"
+
+
 def facet_counts(key):
     """How many exercises each option of ``key`` would match, given the other filters."""
     column = FILTERS[key][0]
@@ -108,11 +103,120 @@ def filter_selectbox(label, key):
     )
 
 
-col1, col2 = st.columns(2)
-with col1:
+# ----------------------
+# Plan Actions (button callbacks run before the page is redrawn)
+# ----------------------
+def reset_card_state():
+    for key in list(st.session_state):
+        if key.startswith(CARD_STATE_PREFIXES):
+            del st.session_state[key]
+
+
+def build_plan(filters, requested):
+    reset_card_state()
+    st.session_state["plan"] = {"filters": filters, "requested": requested}
+    st.session_state["results"] = recommend_workouts(df, **filters, n=requested)
+
+
+def generate_plan():
+    build_plan(selected_filters(), st.session_state["num_recommendations"])
+
+
+def shuffle_plan():
+    plan = st.session_state["plan"]
+    build_plan(plan["filters"], plan["requested"])
+
+
+def swap_exercise(idx):
+    """Replace one exercise with another that matches the plan's filters."""
+    results = st.session_state["results"]
+    pool = df[filter_mask(df, **st.session_state["plan"]["filters"])].drop(index=results.index)
+    if pool.empty:
+        st.toast("No other exercises match these filters. Loosen a filter to get more options.", icon="🤷")
+        return
+    replacement = pool.sample(1)
+    position = results.index.get_loc(idx)
+    st.session_state["results"] = pd.concat([results.iloc[:position], replacement, results.iloc[position + 1:]])
+    for prefix in CARD_STATE_PREFIXES:
+        st.session_state.pop(f"{prefix}{idx}", None)
+
+
+# ----------------------
+# Export
+# ----------------------
+def plan_to_markdown(results, filters):
+    lines = ["# My Workout", "", f"_{describe_filters(filters)}_", ""]
+    for number, (_, row) in enumerate(results.iterrows(), start=1):
+        tags = " · ".join(str(row[c]) for c in ["BodyPart", "Equipment", "Level"] if pd.notnull(row[c]))
+        lines.append(f"{number}. **{row['Title']}** ({tags})")
+        if pd.notnull(row["Desc"]):
+            lines.append(f"   {row['Desc']}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+# ----------------------
+# Exercise Card
+# ----------------------
+def render_video(title):
+    try:
+        with st.spinner("Finding a video..."):
+            videos = fetch_youtube_video(title, YOUTUBE_API_KEY)
+    except YouTubeError as exc:
+        st.warning(str(exc))
+        st.link_button("Search on YouTube instead", youtube_search_url(title))
+        return
+    if videos:
+        st.video(videos[0][1])
+    else:
+        st.caption("No video found.")
+        st.link_button("Search on YouTube", youtube_search_url(title))
+
+
+def render_card(number, idx, row):
+    done = st.session_state.get(f"done_{idx}", False)
+    with st.container(border=True):
+        heading = f"{number}. {row['Title']}"
+        st.markdown(f"#### ~~{heading}~~" if done else f"#### {heading}")
+
+        with st.container(horizontal=True, gap="small"):
+            st.badge(row["BodyPart"], icon=":material/accessibility_new:", color="blue")
+            if pd.notnull(row["Equipment"]):
+                st.badge(row["Equipment"], icon=":material/fitness_center:", color="gray")
+            st.badge(row["Level"], color=LEVEL_COLORS.get(row["Level"], "gray"))
+            st.badge(row["Type"], color="violet")
+
+        if pd.notnull(row["Desc"]):
+            st.write(row["Desc"])
+        else:
+            st.caption("No description available.")
+
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.checkbox("Done", key=f"done_{idx}")
+            if YOUTUBE_API_KEY:
+                st.toggle("🎥 Show video", key=f"video_{idx}")
+            else:
+                st.link_button("🎥 Find on YouTube", youtube_search_url(row["Title"]))
+            st.button(
+                "🔀 Swap",
+                key=f"swap_{idx}",
+                on_click=swap_exercise,
+                args=(idx,),
+                help="Replace this with another exercise that matches your filters",
+            )
+
+        # Videos only load when asked for: each lookup costs YouTube API quota.
+        if YOUTUBE_API_KEY and st.session_state.get(f"video_{idx}"):
+            render_video(row["Title"])
+
+
+# ----------------------
+# Sidebar: Inputs
+# ----------------------
+with st.sidebar:
+    st.header("🏋️ Build your workout")
     filter_selectbox("Type of Workout", "workout_type")
     filter_selectbox("Your Fitness Level", "level")
-with col2:
     filter_selectbox("Target Body Part", "bodypart")
     equipment_counts, _ = facet_counts("equipment")
     st.multiselect(
@@ -123,108 +227,98 @@ with col2:
         help="Pick everything you have access to. Leave empty for any equipment.",
         key="equipment",
     )
+    st.slider("Number of exercises", 1, 10, 5, key="num_recommendations")
 
-st.caption(f"**{filter_mask(df, **selected_filters()).sum()}** exercises match your filters.")
-
-num_recommendations = st.slider("Number of Recommendations", 1, 10, 5)
-
-
-# ----------------------
-# YouTube API Helper
-# ----------------------
-class YouTubeError(Exception):
-    pass
-
-
-@st.cache_data(ttl=VIDEO_CACHE_TTL, show_spinner=False)
-def fetch_youtube_video(query, max_results=1):
-    """Search YouTube for ``query``. Raises YouTubeError on failure.
-
-    Only successful responses are cached (Streamlit doesn't cache exceptions),
-    so a transient error or exhausted quota won't stick around.
-    """
-    params = {
-        "part": "snippet",
-        "q": query + " workout",
-        "type": "video",
-        "maxResults": max_results,
-        "key": YOUTUBE_API_KEY,
-    }
-    try:
-        response = requests.get(YOUTUBE_SEARCH_URL, params=params, timeout=10)
-    except requests.RequestException as exc:
-        raise YouTubeError(f"Could not reach YouTube: {exc.__class__.__name__}") from exc
-
-    if not response.ok:
-        try:
-            error = response.json().get("error", {})
-            reason = (error.get("errors") or [{}])[0].get("reason", "")
-            message = error.get("message", response.reason)
-        except ValueError:
-            reason, message = "", response.reason
-        if reason in ("quotaExceeded", "dailyLimitExceeded"):
-            raise YouTubeError("The daily YouTube API quota has been used up. Try again tomorrow.")
-        raise YouTubeError(f"YouTube API error ({response.status_code}): {message}")
-
-    videos = []
-    for item in response.json().get("items", []):
-        video_id = item.get("id", {}).get("videoId")
-        if video_id:
-            title = item.get("snippet", {}).get("title", "")
-            videos.append((title, f"https://www.youtube.com/watch?v={video_id}"))
-    return videos
-
+    matching = int(filter_mask(df, **selected_filters()).sum())
+    st.caption(f"**{matching}** exercises match your filters.")
+    st.button(
+        "Generate workout",
+        type="primary",
+        icon="⚡",
+        width="stretch",
+        on_click=generate_plan,
+        disabled=matching == 0,
+    )
 
 # ----------------------
-# Recommender Button
+# Main Area
 # ----------------------
-# Results live in session_state so they survive reruns triggered by other widgets.
-if st.button("Get My Workout Plan"):
-    st.session_state["results"] = recommend_workouts(df, **selected_filters(), n=num_recommendations)
-    st.session_state["requested"] = num_recommendations
+st.title("💪 Personal Workout Recommender")
+st.markdown(
+    "Looking for a good workout to do today? I've got you covered! "
+    "Set your preferences in the sidebar and I'll put a session together."
+)
 
-results = st.session_state.get("results")
+workout_tab, library_tab = st.tabs(["🏋️ Your Workout", "📚 Exercise Library"])
 
-if results is not None:
-    found = len(results)
-    requested = st.session_state.get("requested", found)
+with workout_tab:
+    results = st.session_state.get("results")
 
-    if found == 0:
-        st.warning("No workouts match those filters. Try setting one or more of them to **Any**.")
+    if results is None:
+        st.info("👈 Pick your filters in the sidebar, then hit **Generate workout**.")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Exercises", f"{len(df):,}")
+        col2.metric("Body parts", df["BodyPart"].nunique())
+        col3.metric("Equipment types", df["Equipment"].nunique())
     else:
-        noun = "workout" if found == 1 else "workouts"
-        if found < requested:
-            st.info(
-                f"Only {found} {noun} match those filters (you asked for {requested}). "
-                "Loosen a filter to see more."
-            )
+        plan = st.session_state["plan"]
+        found, requested = len(results), plan["requested"]
+        noun = "exercise" if found == 1 else "exercises"
+
+        if found == 0:
+            st.warning("No exercises match those filters. Try setting one or more of them to **Any**.")
         else:
-            st.success(f"Here {'is' if found == 1 else 'are'} {found} {noun} tailored to your needs 💥")
+            if found < requested:
+                st.info(
+                    f"Only {found} {noun} match those filters (you asked for {requested}). "
+                    "Loosen a filter to see more."
+                )
+            st.caption(f"{found} {noun} · {describe_filters(plan['filters'])}")
 
-        st.dataframe(results[['Title', 'Type', 'Level', 'BodyPart', 'Equipment']], hide_index=True)
+            done = sum(bool(st.session_state.get(f"done_{idx}")) for idx in results.index)
+            st.progress(done / found, text=f"{done} of {found} done")
+            if done == found:
+                st.success("Workout complete. Nice work! 🎉")
 
-        st.markdown("### 🎥 Video Previews")
-        if not YOUTUBE_API_KEY:
-            st.info(
-                "Video previews are disabled: no YouTube API key configured. "
-                "Add `[api] youtube_key` to `.streamlit/secrets.toml` or set `YOUTUBE_API_KEY`."
-            )
-        else:
-            for _, row in results.iterrows():
-                st.markdown(f"**{row['Title']}**")
-                try:
-                    with st.spinner("Finding a video..."):
-                        videos = fetch_youtube_video(row["Title"])
-                except YouTubeError as exc:
-                    st.warning(str(exc))
-                    break  # the remaining lookups would fail the same way
-                if videos:
-                    st.video(videos[0][1])
-                else:
-                    st.write("No video found.")
+            with st.container(horizontal=True):
+                st.button("🔀 Shuffle all", on_click=shuffle_plan, help="Get a fresh set with the same filters")
+                st.download_button(
+                    "⬇️ Markdown",
+                    plan_to_markdown(results, plan["filters"]),
+                    file_name="workout.md",
+                    mime="text/markdown",
+                    on_click="ignore",
+                )
+                st.download_button(
+                    "⬇️ CSV",
+                    results[DISPLAY_COLUMNS + ["Desc"]].to_csv(index=False),
+                    file_name="workout.csv",
+                    mime="text/csv",
+                    on_click="ignore",
+                )
 
-        if 'Desc' in results.columns:
-            with st.expander("📝 View Descriptions"):
-                for _, row in results.iterrows():
-                    desc = row['Desc'] if pd.notnull(row['Desc']) else 'No description available'
-                    st.markdown(f"**{row['Title']}**: {desc}")
+            for number, (idx, row) in enumerate(results.iterrows(), start=1):
+                render_card(number, idx, row)
+
+with library_tab:
+    query = st.text_input("Search exercises", placeholder="e.g. lunge, kettlebell swing", key="library_search")
+    use_filters = st.toggle("Apply sidebar filters", value=True, key="library_use_filters")
+
+    library = df[filter_mask(df, **selected_filters())] if use_filters else df
+    if query:
+        library = library[
+            library["Title"].str.contains(query, case=False, regex=False)
+            | library["Desc"].fillna("").str.contains(query, case=False, regex=False)
+        ]
+
+    st.caption(f"{len(library):,} exercises")
+    st.dataframe(
+        library[DISPLAY_COLUMNS + ["Desc"]].fillna({"Desc": ""}),
+        hide_index=True,
+        height=520,
+        column_config={
+            "Title": st.column_config.TextColumn("Exercise", width="medium"),
+            "BodyPart": "Body part",
+            "Desc": st.column_config.TextColumn("Description", width="large"),
+        },
+    )
