@@ -1,0 +1,3 @@
+streamlit>=1.53  # keyed select widgets keep their value when option labels change
+pandas>=2.0
+requests>=2.31
