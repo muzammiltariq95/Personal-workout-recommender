@@ -13,10 +13,13 @@ This is an AI-powered workout recommendation app built using **Python**, **Panda
 - Filter workouts by Type, Level, Body Part, and Equipment
 - Select all the equipment you have access to, not just one item
 - Live match counts next to every filter option, so you never pick a combination with no results
-- See tailored workout recommendations
-- Get real-time **YouTube** video previews for each recommended exercise (cached to save API quota)
+- Workout shown as exercise cards with muscle, equipment, level and type tags
+- **Swap** any single exercise for another that fits your filters, or **Shuffle** the whole set
+- Tick exercises off as you go, with a progress bar
+- Download your workout as Markdown or CSV
+- Browse and search all ~2,900 exercises in the **Exercise Library** tab
+- **YouTube** video previews that load on demand (and are cached), to save API quota
 - Cleaned and structured gym dataset
-- Interactive Streamlit interface
 
 ## Tech Stack
 
@@ -41,7 +44,7 @@ pip install -r requirements.txt
 
 ### 2. Add a YouTube API key (optional)
 
-Video previews use the [YouTube Data API v3](https://developers.google.com/youtube/v3/getting-started). Without a key the app still works, but video previews are turned off.
+Video previews use the [YouTube Data API v3](https://developers.google.com/youtube/v3/getting-started). Without a key the app still works: each exercise gets a "Find on YouTube" link instead of an embedded video.
 
 Create `.streamlit/secrets.toml` (it is git-ignored):
 
@@ -56,7 +59,7 @@ Or set it as an environment variable:
 export YOUTUBE_API_KEY="YOUR_API_KEY"
 ```
 
-> Each YouTube search costs 100 units out of the free 10,000 daily quota. Results are cached for a week, so the same exercise is only looked up once.
+> Each YouTube search costs 100 units out of the free 10,000 daily quota. Videos only load when you click **Show video** on an exercise, and results are cached for a week, so the same exercise is only looked up once.
 
 ### 3. Run the app
 
@@ -95,8 +98,10 @@ The app is ready to deploy on [Streamlit Community Cloud](https://share.streamli
 
 ```
 ├── .github/workflows/ci.yml    # Lint + test on every push
+├── .streamlit/config.toml      # Theme (secrets.toml is git-ignored)
 ├── app/
-│   └── streamlit_app.py        # Streamlit UI and YouTube integration
+│   ├── streamlit_app.py        # Streamlit UI
+│   └── youtube.py              # YouTube API helpers
 ├── models/
 │   └── recommender.py          # Recommendation logic
 ├── data/
