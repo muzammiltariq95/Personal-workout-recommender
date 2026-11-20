@@ -11,6 +11,5 @@ __pycache__/
 .DS_Store
 *.log
 
-# Streamlit cache (optional)
-.streamlit/
+# Streamlit secrets (API keys). config.toml is committed.
 .streamlit/secrets.toml
